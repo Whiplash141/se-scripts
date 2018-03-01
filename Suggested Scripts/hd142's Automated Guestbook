@@ -1,0 +1,50 @@
+//Frosted Butts 1.0
+//Reads sensor data, stores a log of passing players in sensor's custom data
+//Only records first time a player was seen by the sensor, only meant for one sensor
+//by hd142
+//Revenge is a dish best served frosty
+
+const string sensorName = "Sensor Shields";
+
+StringBuilder sb = new StringBuilder(); 
+
+public string toScreen = "frosted butts";
+
+public string startTime = DateTime.Now.ToString(); 
+
+Program() 
+{ 
+    Runtime.UpdateFrequency = UpdateFrequency.Update100; 
+} 
+
+public void Main()
+{
+
+	Echo("Frosting butts since " + startTime);
+    Echo($"LastRun: {DateTime.Now}"); 	
+
+	var sensor = GridTerminalSystem.GetBlockWithName(sensorName) as IMySensorBlock;
+
+	MyDetectedEntityInfo entity = sensor.LastDetectedEntity;
+
+	if (!entity.IsEmpty())
+	{ 
+
+		string Name = entity.Name.ToString();
+		string Allegiance = entity.Relationship.ToString();
+		string Time1 = System.DateTime.Now.ToString();
+
+		bool b = toScreen.Contains(Name);
+
+		if(!b)
+			{
+			
+			sb.AppendLine(Name + " " + Allegiance + " " + Time1);
+
+			toScreen = sb.ToString(); 
+					 
+			sensor.CustomData = toScreen;
+			
+			}
+	}
+}
