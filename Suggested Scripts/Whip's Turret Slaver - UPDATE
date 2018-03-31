@@ -1,5 +1,5 @@
 /*
-/// Whip's Turret Slaver v68 /// - revision: 3/31/18 
+/// Whip's Turret Slaver v69 /// - revision: 3/31/18 
 --------------------------------------------------------------------------------
 ================README==================
 --------------------------------------------------------------------------------
@@ -665,13 +665,8 @@ class TurretGroup
         {
             var targetInfo = designator.GetTargetedEntity();
 
-            if (isRocket)
-            {
-                if (_userInputVelocity)
-                    targetVec = CalculateProjectileInterceptMissile(projectileVelocity, gridVelocity, shooterPosition, targetInfo.Velocity, targetInfo.Position);
-                else
-                    targetVec = CalculateProjectileInterceptMissile(projectileVelocity, Vector3D.Zero, shooterPosition, targetInfo.Velocity, targetInfo.Position);
-            }
+            if (isRocket && !_userInputVelocity)
+                targetVec = CalculateProjectileInterceptMissile(projectileVelocity, gridVelocity, shooterPosition, targetInfo.Velocity, targetInfo.Position);
             else
                 targetVec = CalculateProjectileIntercept(projectileVelocity, gridVelocity, shooterPosition, targetInfo.Velocity, targetInfo.Position);
         }
@@ -1407,6 +1402,7 @@ Change Log:
 - Added in custom data parsing for muzzle velocity - v67
 - Fixed custom data parsing for turrets - v68
 - Workaround for game bug with idle rotation - v68
+- Fixed leading method for custom weapons - v69
 
 To-do list:
 - Add in custom bullet velocity arguments
