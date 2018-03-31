@@ -1,6 +1,6 @@
 /*     
-Whip's Multi-Group Weapon Salvo Script v33 - Revision: 12/2/17 
-////PUBLIC RELEASE////  
+Whip's Multi-Group Weapon Salvo Script v39 - Revision: 3/29/18
+/ //// /PUBLIC RELEASE/ //// /
 HOWDY!  
 ______________________________________________________________________________________    
 SETUP INSTRUCTIONS
@@ -15,7 +15,7 @@ Type in these arguments without quotes. Arguments are case INSENSITIVE.
 These arguments can be input manually to the program argument field, 
 this program's Custom Data, through timers, or through sensors. 
  
-In the Custom Data, command lines can be seperated with semi-colons, or they can each have
+In the Custom Data, command lines can be separated with semi-colons, or they can each have
 their own lines. 
 
 > BASIC ARGUMENT SYNTAX
@@ -42,6 +42,9 @@ their own lines.
 
     delay <integer>  
         Sets number of ticks between shots (60 ticks = 1 sec)
+        
+    burst <integer>
+        Shoots a burst with the specified number of shots
 
     default  
         Lets the script to set the fire rate automatically based on the number of     
@@ -99,41 +102,55 @@ bool isSetup = false;
 
 Program()
 {
-    Runtime.UpdateFrequency = UpdateFrequency.Update1;
+    Runtime.UpdateFrequency = UpdateFrequency.Once;
 }
 
 void Main(string arg, UpdateType updateSource)
 {
-    string userCommands = Me.CustomData;
+    //------------------------------------------
+    //This is a bandaid for keen's shit code
+    if ((updateSource & UpdateType.Once) != 0)
+        Runtime.UpdateFrequency = UpdateFrequency.Update1;
+    //------------------------------------------
+    
+    string userCommands = "";
+    bool queueArg = false;
     
     if ((updateSource & (UpdateType.Trigger | UpdateType.Terminal)) != 0)
     {
-        userCommands += ";" + arg;
+        userCommands = $"{arg};";
+        queueArg = true;
+    }
+    
+    if (!isSetup || currentTime >= refreshTime)
+    {
+        userCommands += $"{Me.CustomData};";
+        isSetup = GrabBlockGroups();
+        currentTime = 0;
+        queueArg = true;
+    }
+    
+    if (queueArg)
+    {
         foreach (var thisGroup in salvoGroups)
         {
             thisGroup.ProcessArgument(userCommands);
         }
     }
-    
-    if (!isSetup || currentTime >= refreshTime)
-    {
-        isSetup = GrabBlockGroups();
-        currentTime = 0;
-    }
 
     if (!isSetup)
         return;
     
-    Echo($"WMI Weapon Salvo Code\n\nNext block refresh in {Math.Max(0, refreshTime - currentTime):N0} seconds");
+    Echo($"WMI Weapon Salvo Code\n\nNext block refresh in {Math.Max(0, refreshTime - currentTime):N0} seconds");   
     
     if ((updateSource & UpdateType.Update1) != 0)
     {
+        currentTime += (1.0 / 60.0);
         try
         {
-            currentTime += 1.0/60.0;
             foreach (var thisGroup in salvoGroups)
             {
-                thisGroup.SequenceWeapons(userCommands);
+                thisGroup.SequenceWeapons();
             }
         }
         catch
@@ -142,13 +159,19 @@ void Main(string arg, UpdateType updateSource)
             isSetup = false;
         }
     }
+    
+    Echo($"\nCurrent instructions: {Runtime.CurrentInstructionCount}\nMax instructions: {Runtime.MaxInstructionCount}");
 }
 
 List<WeaponSalvoGroup> salvoGroups = new List<WeaponSalvoGroup>();
 List<IMyBlockGroup> sequenceGroups = new List<IMyBlockGroup>();
-List<IMyBlockGroup> cachedSequenceGroups = new List<IMyBlockGroup>();
+HashSet<IMyBlockGroup> cachedSequenceGroups = new HashSet<IMyBlockGroup>();
 bool GrabBlockGroups()
 {
+    GetAllowedGrids(Me);
+    if (!isFinished)
+        return false;
+    
     //salvoGroups.Clear();
     sequenceGroups.Clear();
     cachedSequenceGroups.Clear();
@@ -160,15 +183,15 @@ bool GrabBlockGroups()
         Echo($"----------------------------------\nERROR: No groups containing the\n name tag '{salvoGroupNameTag}' were found");
         return false;
     }
-
-    //Echo($"sequenceGroups: {sequenceGroups.Count}");
-    //Echo($"salvoGroups: {salvoGroups.Count}");
     
     //removes salvo groups that dont exist any more
     salvoGroups.RemoveAll(x => !sequenceGroups.Contains(x.ThisGroup));
     
-    //Echo($"salvoGroups: {salvoGroups.Count}");
-    //Echo($"cachedSequenceGroups: {cachedSequenceGroups.Count}");
+    //Update existing salvo groups
+    foreach (var group in salvoGroups)
+    {
+        group.GetBlocks(allowedGrids);
+    }
 
     //add groups that currently exist and are already initialized to a list
     foreach (var salvoGroup in salvoGroups)
@@ -181,7 +204,7 @@ bool GrabBlockGroups()
     foreach (var group in sequenceGroups)
     {
         if (!cachedSequenceGroups.Contains(group))
-            salvoGroups.Add(new WeaponSalvoGroup(group, this)); //add groups that now exist, but were not initialized
+            salvoGroups.Add(new WeaponSalvoGroup(group, this, allowedGrids)); //add groups that now exist, but were not initialized
     }
     return true;
 }
@@ -195,22 +218,32 @@ public class WeaponSalvoGroup
     int _timeCount = 0;
     int _delay = 0;
     int _defaultRateOfFire = 1;
+    int _burstCount = 0;
     double _desiredRPM = 0;
     bool _isShooting = false;
     bool _executeToggle = false;
     bool _manualOverride = false;
+    bool _limitReached = false;
+    bool _shouldBurst = false;
     string _messageToggle = "";
     string _messageOverride = "";
+    IMyUserControllableGun weaponToFire = null;
 
-    public WeaponSalvoGroup(IMyBlockGroup group, Program program)
+    public WeaponSalvoGroup(IMyBlockGroup group, Program program, HashSet<IMyCubeGrid> allowedGrids)
     {
         ThisGroup = group;
         _thisProgram = program;
+        this.GetBlocks(allowedGrids);
+    }
+    
+    void Echo(string echoStr)
+    {
+        _thisProgram.Echo(echoStr);
     }
 
-    private void GetBlocks()
+    public void GetBlocks(HashSet<IMyCubeGrid> allowedGrids)
     {
-        ThisGroup.GetBlocksOfType(_weapons, x => !(x is IMyLargeTurretBase) && x.IsFunctional);
+        ThisGroup.GetBlocksOfType(_weapons, x => !(x is IMyLargeTurretBase) && x.IsFunctional && allowedGrids.Contains(x.CubeGrid));
 
         //Sorting method
         _weapons.Sort((gun1, gun2) => gun1.CustomName.CompareTo(gun2.CustomName));
@@ -229,14 +262,14 @@ public class WeaponSalvoGroup
             if (argumentFields.Length < 2) //no valid command
                 continue;
             
-            if (!ThisGroup.Name.ToLower().Trim().Equals(argumentFields[0].ToLower().Trim())) //explicit name that trims spaces
+            if (!ThisGroup.Name.Trim().Equals(argumentFields[0].Trim(), StringComparison.OrdinalIgnoreCase)) //explicit name that trims spaces
                 continue;
-            
+            Echo("TEST");
             for (int i = 1; i < argumentFields.Length; i++)
             {
-                string command = argumentFields[i].ToLower();
+                string command = argumentFields[i].ToLower().Trim();
 
-                if (command.Contains("rps")) //change rate of fire manually    
+                if (command.StartsWith("rps", StringComparison.OrdinalIgnoreCase)) //change rate of fire manually    
                 {
                     var value = command.Replace("rps", "").Trim();
 
@@ -249,7 +282,7 @@ public class WeaponSalvoGroup
                     _delay = (int)Math.Ceiling(delayUnrounded);
                     _manualOverride = true;
                 }
-                if (command.Contains("rpm")) //change rate of fire manually    
+                if (command.StartsWith("rpm", StringComparison.OrdinalIgnoreCase)) //change rate of fire manually    
                 {
                     var value = command.Replace("rpm", "").Trim();
 
@@ -262,7 +295,7 @@ public class WeaponSalvoGroup
                     _delay = (int)Math.Ceiling(delayUnrounded);
                     _manualOverride = true;
                 }
-                else if (command.Contains("delay")) //change delay (in ticks) between shots; 60 ticks = 1 sec    
+                else if (command.StartsWith("delay", StringComparison.OrdinalIgnoreCase)) //change delay (in ticks) between shots; 60 ticks = 1 sec    
                 {
                     var value = command.Replace("delay", "").Trim(); //trim spaces and remove keyword
 
@@ -270,24 +303,35 @@ public class WeaponSalvoGroup
                     bool isInteger = int.TryParse(value, out valueInteger);
                     if (!isInteger) continue;
 
-                    
                     _delay = valueInteger;
                     _desiredRPM = 3600.0 / _delay;
                     _manualOverride = true;
                 }
-                else if (command.Contains("default")) //lets the script set fire rate       
+                else if (command.StartsWith("burst", StringComparison.OrdinalIgnoreCase))
+                {
+                    var value = command.Replace("burst", "").Trim(); //trim spaces and remove keyword
+                    
+                    int valueInteger = 0;
+                    bool isInteger = int.TryParse(value, out valueInteger);
+                    if (!isInteger) continue;
+                    
+                    _burstCount = valueInteger;
+                    _executeToggle = true;
+                    _shouldBurst = true;
+                }
+                else if (command.Equals("default", StringComparison.OrdinalIgnoreCase)) //lets the script set fire rate       
                 {
                     _manualOverride = false;
                 }
-                else if (command.Contains("fire_on")) //toggle fire on      
+                else if (command.Equals("fire_on", StringComparison.OrdinalIgnoreCase)) //toggle fire on      
                 {
                     _executeToggle = true;
                 }
-                else if (command.Contains("fire_off")) //toggle fire off
+                else if (command.Equals("fire_off", StringComparison.OrdinalIgnoreCase)) //toggle fire off
                 {
                     _executeToggle = false;
                 }
-                else if (command.Contains("fire_toggle")) //toggle fire on/off
+                else if (command.Equals("fire_toggle", StringComparison.OrdinalIgnoreCase)) //toggle fire on/off
                 {
                     _executeToggle = !_executeToggle;
                 }
@@ -297,9 +341,9 @@ public class WeaponSalvoGroup
         #endregion
     }
 
-    public void SequenceWeapons(string argument = "")
+    public void SequenceWeapons()
     {
-        GetBlocks();
+        //GetBlocks();
 
         if (_weapons.Count == 0)
         {
@@ -313,84 +357,6 @@ public class WeaponSalvoGroup
         }
         else
             _defaultRateOfFire = 1;
-
-        //It's splittin' time!     
-        string[] argumentSplit = argument.Split(new char[]{'\n', ';'});  //split at semicolons and new lines
-
-        //====ARGUMENT HANDLING====
-        #region ARGUMENT HANDLING
-        foreach (string thisArgument in argumentSplit)
-        {
-            var argumentFields = thisArgument.Split(':');
-            if (argumentFields.Length < 2) //no valid command
-                continue;
-            
-            if (!ThisGroup.Name.ToLower().Trim().Equals(argumentFields[0].ToLower().Trim())) //explicit name that trims spaces
-                continue;
-            
-            for (int i = 1; i < argumentFields.Length; i++)
-            {
-                string command = argumentFields[i].ToLower();
-
-                if (command.Contains("rps")) //change rate of fire manually    
-                {
-                    var value = command.Replace("rps", "").Trim();
-
-                    double valueDouble;
-                    bool isDouble = double.TryParse(value, out valueDouble);
-                    if (!isDouble) continue;
-
-                    double delayUnrounded = 60.0 / valueDouble; //Dont change this from 60 
-                    _desiredRPM = valueDouble * 60.0;
-                    _delay = (int)Math.Ceiling(delayUnrounded);
-                    _manualOverride = true;
-                }
-                if (command.Contains("rpm")) //change rate of fire manually    
-                {
-                    var value = command.Replace("rpm", "").Trim();
-
-                    double valueDouble;
-                    bool isDouble = double.TryParse(value, out valueDouble);
-                    if (!isDouble) continue;
-
-                    double delayUnrounded = 3600.0 / valueDouble;
-                    _desiredRPM = valueDouble;                   
-                    _delay = (int)Math.Ceiling(delayUnrounded);
-                    _manualOverride = true;
-                }
-                else if (command.Contains("delay")) //change delay (in ticks) between shots; 60 ticks = 1 sec    
-                {
-                    var value = command.Replace("delay", "").Trim(); //trim spaces and remove keyword
-
-                    int valueInteger = 0;
-                    bool isInteger = int.TryParse(value, out valueInteger);
-                    if (!isInteger) continue;
-
-                    
-                    _delay = valueInteger;
-                    _desiredRPM = 3600.0 / _delay;
-                    _manualOverride = true;
-                }
-                else if (command.Contains("default")) //lets the script set fire rate       
-                {
-                    _manualOverride = false;
-                }
-                else if (command.Contains("fire_on")) //toggle fire on      
-                {
-                    _executeToggle = true;
-                }
-                else if (command.Contains("fire_off")) //toggle fire off
-                {
-                    _executeToggle = false;
-                }
-                else if (command.Contains("fire_toggle")) //toggle fire on/off
-                {
-                    _executeToggle = !_executeToggle;
-                }
-            }
-            
-        }
-        #endregion
 
         //Checks for divide by zero
         if (_delay == 0)
@@ -423,19 +389,23 @@ public class WeaponSalvoGroup
         //===SEQUENCER HANDLING===
         if (_timeCount >= _delay)
         {
-            ////===RESETTING ALL WEAPON STATES===          
-            foreach (var thisWeapon in _weapons)
+            if (!_limitReached)
             {
-                thisWeapon.ApplyAction("OnOff_Off");
+                ////===RESETTING ALL WEAPON STATES===          
+                foreach (var thisWeapon in _weapons)
+                {
+                    thisWeapon.Enabled = false;
+                }
+
+                //===ACTIVATING SPECIFIED WEAPON===  
+                if (_weaponCount >= _weapons.Count)
+                    _weaponCount = 0; //incase something gets broken
+
+                weaponToFire = _weapons[_weaponCount];
+                weaponToFire.Enabled = true;
+                _limitReached = true;
             }
-
-            //===ACTIVATING SPECIFIED WEAPON===  
-            if (_weaponCount >= _weapons.Count)
-                _weaponCount = 0; //incase something gets broken
-
-            var weaponToFire = _weapons[_weaponCount];
-            weaponToFire.Enabled = true;
-
+            
             if (_isShooting)
             {
                 if (_weaponCount + 1 < _weapons.Count)
@@ -446,15 +416,26 @@ public class WeaponSalvoGroup
                 {
                     _weaponCount = 0;
                 }
-                //weaponToFire.ApplyAction("OnOff_Off"); //turn off and wait
                 _timeCount = 0; //start count over
                 _isShooting = false;
                 weaponToFire.Enabled = false;
+                _limitReached = false;
+                
+                if (_burstCount > 1 && _shouldBurst)
+                {
+                    _burstCount--;
+                }
+                else if (_shouldBurst)
+                {
+                    _shouldBurst = false;
+                    _executeToggle = false;
+                    _burstCount = 0; //has to be bigger than 0
+                }
             }
-
+            
             if (_executeToggle)
             {
-                weaponToFire.ApplyAction("ShootOnce");
+                weaponToFire.ApplyAction("ShootOnce"); //there is no interface method for this :(
                 _messageToggle = ">>Toggle Fire Enabled<<";
             }
             else
@@ -477,9 +458,59 @@ public class WeaponSalvoGroup
         }
 
         //Debug    
-        string output = $"----------------------------------\nInfo for '{ThisGroup.Name}' \n{_messageToggle}\n{_messageOverride}\nNo. Weapons: {_weapons.Count}\nRate of Fire: {_desiredRPM} -> {3600.0 / (double)_delay:N1} RPM\nDelay: {_delay} ticks\nCurrent Time: {_timeCount}\nWeapon Count: {_weaponCount}\nIsShooting: {_isShooting}";
+        string output = $"----------------------------------\nInfo for '{ThisGroup.Name}' \n{_messageToggle}\n{_messageOverride}\nNo. Weapons: {_weapons.Count}\nRate of Fire: {_desiredRPM} -> {3600.0 / (double)_delay:N1} RPM\nDelay: {_delay} ticks\nCurrent Time: {_timeCount}\nWeapon Count: {_weaponCount}\nIsShooting: {_isShooting}\nBurst Count: {_burstCount}";
         _thisProgram.Echo(output);
     }
+}
+
+/*
+/ //// / Whip's GetAllowedGrids method v1 - 3/17/18 / //// /
+Derived from Digi's GetShipGrids() method - https://pastebin.com/MQUHQTg2
+*/
+List<IMyMechanicalConnectionBlock> allMechanical = new List<IMyMechanicalConnectionBlock>();
+HashSet<IMyCubeGrid> allowedGrids = new HashSet<IMyCubeGrid>();
+bool isFinished = true;
+void GetAllowedGrids(IMyTerminalBlock reference, int instructionLimit = 1000)
+{
+    if (isFinished)
+    {
+        allowedGrids.Clear();
+        allowedGrids.Add(reference.CubeGrid);
+    }
+
+    GridTerminalSystem.GetBlocksOfType(allMechanical, x => x.TopGrid != null);
+
+    bool foundStuff = true;
+    while (foundStuff)
+    {
+        foundStuff = false;
+
+        for (int i = allMechanical.Count - 1; i >= 0; i--)
+        {
+            var block = allMechanical[i];
+            if (allowedGrids.Contains(block.CubeGrid))
+            {
+                allowedGrids.Add(block.TopGrid);
+                allMechanical.RemoveAt(i);
+                foundStuff = true;
+            }
+            else if (allowedGrids.Contains(block.TopGrid))
+            {
+                allowedGrids.Add(block.CubeGrid);
+                allMechanical.RemoveAt(i);
+                foundStuff = true;
+            }
+        }
+
+        if (Runtime.CurrentInstructionCount >= instructionLimit)
+        {
+            Echo("Instruction limit reached\nawaiting next run");
+            isFinished = false;
+            return;
+        }
+    }
+
+    isFinished = true;
 }
 
 /*
@@ -504,4 +535,19 @@ v32
 
 v33
 *Fixed arguments not parsing
+
+v34
+* Replaced all terminal actions with proper interface methods (that I could...)
+
+v37
+* Vastly improved performance
+    - Blocks are only fetched every 10 seconds
+    - Minimized number of times the code messes with block power states
+    
+v38
+* Code now only searches for blocks on grid and subgrids
+* Fixed issue where codes were triggered multiple times on DS
+
+v39
+* Added burst fire command
 */
