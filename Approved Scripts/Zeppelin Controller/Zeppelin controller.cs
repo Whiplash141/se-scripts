@@ -14,7 +14,7 @@
  *  
  * 5. To start the script, simply run it. I recommend running it with the "reset" command before doing anything else, and make sure your gas cells are only about 70% full.
  *  
- * 6. Happy flying! Try not to change altitude too rapidly. The script will turn itself off when you park and leave the zeppelin.
+ * 6. Happy flying! Try not to change altitude too rapidly (more than 500m at a time). The script will turn itself off when you park and leave the zeppelin.
  *
  * :SCRIPT COMMANDS:
  * sea <number> 		Set target altitude to <number> kilometers above sea level
@@ -26,7 +26,7 @@
 const bool useExhaust = true; //Whether or not this should use the hydrogen exhaust to dump hydrogen.
 const bool useHydroFarm = true; //Whether or not this should use the hydrogen farms to gain hydrogen.
 const double passiveHydroThreshold = 0.95; //How much to fill the ballast tanks to when using hydrogen farms.
-static double passiveCellThreshold = 0.5;
+static double passiveCellThreshold = 0.8;
 
 //Constant Values 
 static double BALLOON_NEWTONS = 520846.0377344; //Amount of Newtons of force exerted by each balloon 
@@ -52,7 +52,7 @@ double I_decay = 0.8;
 //Variables 
 double desiredAltitude = 3.5; 
 double currentAltitude = 0;
-static double lastTargetRatio = 0;
+static double lastTargetRatio = -1;
 
 double currVertVel; 
 double lastAltitude; 
@@ -95,6 +95,7 @@ public void Main(string argument)
 	{ 
 		findComponents(); 
 		Echo("INITIALIZED");
+		
 		init = true; 
 	} 
 	Runtime.UpdateFrequency = UpdateFrequency.Update10; 
@@ -103,8 +104,7 @@ public void Main(string argument)
 	rc.TryGetPlanetElevation(MyPlanetElevation.Sealevel, out currentAltitude); 
 	currentAltitude/=1000;
 	findVertVel(currentAltitude); 
-
-
+	
 	//Argument parsing
 	if(!argument.Equals("") && argument != null){
 		string[] argumentSplit = argument.Split(';'); 
@@ -188,8 +188,8 @@ public void Main(string argument)
 		} 
 	}
 
-	//printout += "Planet Mode: " + planet+"\n"; 
 
+	//check to see if parked
 	bool disable = false;
 	if((double)rc.CalculateShipMass().PhysicalMass <= (double)rc.CalculateShipMass().BaseMass){
 		List<IMyLandingGear> gears = new List<IMyLandingGear>();
@@ -214,12 +214,15 @@ public void Main(string argument)
 		disable = true;
 	}
 	
+	//compute fill ratio of ballast tanks
 	double avgTankFill = 0;
 	foreach(IMyGasTank tank in ballasts){
 		avgTankFill += tank.FilledRatio;
 	}
 	avgTankFill /= ballasts.Count();
 
+	
+	//clamp error to limit oscillation.
 	double error = desiredAltitude - currentAltitude;
 	if(error > errorClamp) error = errorClamp;
 	if(error < -errorClamp) error = -errorClamp;
@@ -233,6 +236,11 @@ public void Main(string argument)
 	
 	double targetRatio = getNeededFilledRatio(desiredAltitude); 	
 	
+	//initialize lastTargetRatio
+	if(lastTargetRatio < 0){
+		lastTargetRatio = passiveCellThreshold;
+	}
+	
 	if(!disable){			
 		PID_sum += (error + lastError) * (msElapsed) / 2000.0;
 		PID_sum *= I_decay;
@@ -240,13 +248,13 @@ public void Main(string argument)
 		iTerm = I * PID_sum;
 		dTerm = D * deltaError;
 		
+		//clamp potential runaway terms ;_;
 		//if(pTerm < -targetRatio / 2) pTerm = -targetRatio / 2;
 		if(iTerm < -targetRatio / 2) iTerm = -targetRatio / 2;
 		if(dTerm < -targetRatio / 2) dTerm = -targetRatio / 2;
 	}
 	
 	targetRatio += pTerm + iTerm + dTerm; 	
-	
 	
 	double deviation = Math.Abs(targetRatio - currentRatio); 
 	
@@ -264,7 +272,6 @@ public void Main(string argument)
 			toggleOxygen(false); 
 		}
 		
-		lastTargetRatio = targetRatio;
 		printout += "Increasing filled ratio\n"; 
 	} 
 	else if (currentRatio > targetRatio && deviation > ERROR_MARGIN && !disable) 
@@ -280,33 +287,35 @@ public void Main(string argument)
 			toggleThrust(true);
 		}
 		
-		lastTargetRatio = targetRatio;
 		printout += "Decreasing filled ratio\n"; 
 	} 
 	else 
 	{ 
+		if(!disable){
 		//maintain ratio
-		toggleThrust(false); 
-		toggleBallast(false);
-		toggleBalloon(false);
-		
-		if(avgTankFill <= passiveHydroThreshold)
-			toggleBallast(true);
-		else
-			toggleBallast(false);
-			
-		
-		if(currentRatio <= lastTargetRatio)
-			toggleBalloon(true);
-		else
-			toggleBalloon(false);
-					
-		printout += "Maintaining filled ratio\n"; 
-		
-		
-		//if it is parked...
-		if(disable){
 			toggleThrust(false); 
+			toggleBallast(false);
+			toggleBalloon(false);
+			
+			if(avgTankFill <= passiveHydroThreshold)
+				toggleBallast(true);
+			else
+				toggleBallast(false);
+				
+			
+			if(currentRatio <= targetRatio)
+				toggleBalloon(true);
+			else
+				toggleBalloon(false);
+						
+			printout += "Maintaining filled ratio\n"; 
+		} else { //if it is parked...
+			
+			if(currentRatio > lastTargetRatio + 0.1){
+				toggleThrust(true);
+			}else{
+				toggleThrust(false); 
+			}
 			
 			if(avgTankFill <= passiveHydroThreshold || currentRatio <= lastTargetRatio){
 				toggleOxygen(true);
@@ -328,11 +337,6 @@ public void Main(string argument)
 		}
 	} 
 
-	
-	if(lastTargetRatio == 0){
-		lastTargetRatio = currentRatio;
-		if(lastTargetRatio < passiveCellThreshold) lastTargetRatio = passiveCellThreshold;
-	}
 	if(!disable){
 		if(targetRatio > 0){
 			lastTargetRatio = targetRatio;
@@ -516,6 +520,12 @@ double getAtmosphericDensity(double altitudeKM)
 double getNeededFilledRatio(double desiredAltitude) 
 { 
 	double ratio = ((double)rc.CalculateShipMass().PhysicalMass * gravity) / (balloons.Count * balloonForce * getAtmosphericDensity(desiredAltitude)); 
+	return ratio; 
+} 
+
+double getBaseFilledRatio(double desiredAltitude) 
+{ 
+	double ratio = ((double)rc.CalculateShipMass().BaseMass * gravity) / (balloons.Count * balloonForce * getAtmosphericDensity(desiredAltitude)); 
 	return ratio; 
 } 
 
