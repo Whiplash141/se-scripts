@@ -32,7 +32,7 @@ const string statusLightsGroup = "Mode Lights"; //This is the name for the Light
 
 const float roverPower = 100;
 const float roverFriction = 100;
-const float roverStrength = 50;
+const float roverStrength = 20;
 const float roverDamping = 95;
 const bool roverSteering = true;
 const float roverSteeringAngle = 25;
@@ -42,7 +42,7 @@ Color roverColor = new Color(255, 255, 0, 255);
 
 const float skimmerPower = 100;
 const float skimmerFriction = 0;
-const float skimmerStrength = 75;
+const float skimmerStrength = 95;
 const float skimmerDamping = 95;
 
 Color skimmerColor = new Color(255, 0, 0, 255);
@@ -98,21 +98,27 @@ public void Main(string argument) {
 			wheel.SetValue<float>("Power", roverPower);
 			wheel.SetValue<float>("Friction", roverFriction);
 			wheel.SetValue<float>("Strength", roverStrength);
-			wheel.SetValue<float>("Damping", roverDamping);
+			//wheel.SetValue<float>("Damping", roverDamping);
 			
 			wheel.SetValue<bool>("Steering", roverSteering);
 			wheel.SetValue<bool>("Propulsion", true);
 		}
+		
+		Echo("UPDATED WHEELS");
 		
 		//DISABLE ALL HYDROGEN TANKS
 		foreach(IMyGasTank tank in tanksList){
 			tank.SetValue<bool>("Stockpile", true);
 		}
 		
+		Echo("DISABLED TANKS");
+		
 		//UPDATE THE LIGHTS
 		foreach(IMyInteriorLight light in lightsList){
 			light.SetValue("Color", roverColor);
 		}
+		
+		Echo("UPDATED LIGHTS");
 		
 	}else{ //SKIMMER MODE
 		//UPDATE WHEELS
@@ -122,21 +128,24 @@ public void Main(string argument) {
 			wheel.SetValue<float>("Power", skimmerPower);
 			wheel.SetValue<float>("Friction", skimmerFriction);
 			wheel.SetValue<float>("Strength", skimmerStrength);
-			wheel.SetValue<float>("Damping", skimmerDamping);
+			//wheel.SetValue<float>("Damping", skimmerDamping);
 			
 			wheel.SetValue<bool>("Steering", false);
 			wheel.SetValue<bool>("Propulsion", false);
 		}
+		Echo("UPDATED WHEELS");
 		
 		//ENABLE ALL HYDROGEN TANKS
 		foreach(IMyGasTank tank in tanksList){
 			tank.SetValue<bool>("Stockpile", false);
 		}
+		Echo("ENABLED TANKS");
 		
 		//UPDATE THE LIGHTS
 		foreach(IMyInteriorLight light in lightsList){
 			light.SetValue("Color", skimmerColor);
 		}
+		Echo("UPDATED LIGHTS");
 		
 	}
 	
