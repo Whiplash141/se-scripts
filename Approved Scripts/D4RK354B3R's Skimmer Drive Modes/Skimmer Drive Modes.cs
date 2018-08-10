@@ -25,14 +25,14 @@
  
 bool driveMode = true; //true for ROVER MODE, false for SKIMMER MODE
 
-const string wheelsGroup = "Drive Wheels"; //This is the name for the wheels group
+const string wheelsGroup = "Wheels"; //This is the name for the wheels group
 
 const string statusLightsGroup = "Mode Lights"; //This is the name for the Lights group. The Lights will reflect the drive status.
 
 
 const float roverPower = 100;
-const float roverFriction = 100;
-const float roverStrength = 20;
+const float roverFriction = 75;
+const float roverStrength = 75;
 const float roverDamping = 95;
 const bool roverSteering = true;
 const float roverSteeringAngle = 25;
@@ -140,6 +140,7 @@ public void Main(string argument) {
 			tank.SetValue<bool>("Stockpile", false);
 		}
 		Echo("ENABLED TANKS");
+		
 		
 		//UPDATE THE LIGHTS
 		foreach(IMyInteriorLight light in lightsList){
