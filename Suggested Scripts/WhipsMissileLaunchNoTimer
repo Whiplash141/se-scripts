@@ -1,0 +1,142 @@
+//hd142 edit on 8/13/2018, now triggers programmable blocks instead
+//NOT FOR TRIGGERING TIMERS, RUNS PROGRAMMABLE BLOCKS WITH THE WORD MISSILE IN THEIR NAME
+
+/* 
+//// Whip's Missile Fire Script //// - revision 8-1 - 8/27/17 
+*/
+ 
+//Name of missile 
+const string missileNameStr = "Missile"; 
+ 
+HashSet<IMyProgrammableBlock> missileProgrammableBlocks = new HashSet<IMyProgrammableBlock>(); 
+HashSet<IMyProgrammableBlock> firingProgrammableBlocks = new HashSet<IMyProgrammableBlock>(); 
+ 
+void Main(string arg) 
+{ 
+    Echo("WMI Missile Fire System\n"); 
+ 
+    switch (arg.ToLower()) 
+    { 
+        case "fire": 
+            FireNextMissile(); 
+            break; 
+ 
+        case "kill": 
+            KillMissiles(); 
+            break; 
+ 
+        default: 
+            break; 
+    } 
+} 
+ 
+ 
+List<IMyTerminalBlock> _blocks = new List<IMyTerminalBlock>(); 
+HashSet<T> GetBlocksOfType<T>(string name = "") where T : class, IMyTerminalBlock 
+{ 
+    var hash = new HashSet<T>(); 
+    GridTerminalSystem.GetBlocks(_blocks); 
+ 
+    foreach (var block in _blocks) 
+    { 
+        if (block is T) 
+        { 
+            if (name == "" || block.CustomName.ToLower().Contains(name.ToLower())) 
+                hash.Add(block as T); 
+        } 
+    } 
+ 
+    return hash; 
+} 
+ 
+void FireNextMissile() 
+{ 
+    //Get list of working missile progblocks 
+    var missileProgrammableBlocksList = new List<IMyProgrammableBlock>(); 
+    GridTerminalSystem.GetBlocksOfType(missileProgrammableBlocksList, x => x.CustomName.Contains(missileNameStr) && x.IsFunctional); 
+ 
+    //Sort missile progblocks alphabetically 
+    missileProgrammableBlocksList.Sort((a, b) => a.CustomName.CompareTo(b.CustomName)); 
+ 
+    //Make hashset from our progblock list 
+    var missileProgrammableBlockHash = new HashSet<IMyProgrammableBlock>(missileProgrammableBlocksList); 
+ 
+    //removes any progblocks not found on the grid from firing progblocks 
+    firingProgrammableBlocks.IntersectWith(missileProgrammableBlockHash); 
+ 
+    //remove firing progblocks from missile progblocks 
+    missileProgrammableBlockHash.ExceptWith(firingProgrammableBlocks);  
+     
+    foreach (var block in missileProgrammableBlockHash) 
+    { 
+        block.TryRun("fire"); 
+        firingProgrammableBlocks.Add(block); 
+        Echo($"Triggered ProgrammableBlock named:\n '{block.CustomName}'"); 
+        var closestProgammableBlock = GetClosestBlockOfType<IMyProgrammableBlock>(block); 
+        if (closestProgammableBlock != null) 
+            missileProgrammableBlocks.Add(closestProgammableBlock); 
+        break; 
+    } 
+     
+    if (missileProgrammableBlockHash.Count == 0) 
+        Echo("No untriggered missile ProgrammableBlocks were found"); 
+} 
+ 
+void KillMissiles() 
+{ 
+    foreach (var block in missileProgrammableBlocks) 
+    { 
+        if (!DoesBlockExist(block)) 
+            continue; 
+ 
+        block.TryRun("kill"); 
+    } 
+     
+    Echo($"Killed guidance for {missileProgrammableBlocks.Count} missile programmable blocks"); 
+     
+    missileProgrammableBlocks.Clear(); 
+} 
+ 
+bool DoesBlockExist(IMyTerminalBlock block) 
+{ 
+    return block.CubeGrid?.GetCubeBlock(block.Position)?.FatBlock == block; 
+} 
+ 
+//Whip's Get Closest Block of Type Method v2 - 10/22/16 
+T GetClosestBlockOfType<T>(IMyTerminalBlock reference = null, string name = "") where T : class, IMyTerminalBlock 
+{ 
+ 
+    var allBlocks = new List<T>(); 
+ 
+    if (name == "") 
+        GridTerminalSystem.GetBlocksOfType(allBlocks); 
+    else 
+        GridTerminalSystem.GetBlocksOfType(allBlocks, block => block.CustomName.Contains(name)); 
+ 
+    if (allBlocks.Count == 0) 
+    { 
+        return null; 
+    } 
+ 
+    var closestBlock = allBlocks[0]; 
+ 
+    if (reference == null) 
+        reference = Me; 
+ 
+    var shortestDistance = Vector3D.DistanceSquared(reference.GetPosition(), closestBlock.GetPosition()); 
+    allBlocks.Remove(closestBlock); //remove this block from the list 
+ 
+    foreach (T thisBlock in allBlocks) 
+    { 
+        var thisDistance = Vector3D.DistanceSquared(reference.GetPosition(), thisBlock.GetPosition()); 
+ 
+        if (thisDistance < shortestDistance) 
+        { 
+            closestBlock = thisBlock; 
+            shortestDistance = thisDistance; 
+        } 
+        //otherwise move to next one 
+    } 
+ 
+    return closestBlock; 
+}
