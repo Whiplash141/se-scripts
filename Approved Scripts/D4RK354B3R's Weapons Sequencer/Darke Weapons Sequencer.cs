@@ -18,6 +18,7 @@ Commands are split by colons.
 fire_toggle
 fire_once
 fire_burst num
+fire_mouse
 rps num
 rpm num
 delay num
@@ -32,6 +33,7 @@ fireMode:
 0. not firing. inactive.
 1. toggled on
 2. fire # of shots
+3. mouse fire
 */
 
 List<IMyUserControllableGun> guns = new List<IMyUserControllableGun>();
@@ -170,8 +172,12 @@ void ParseCommands(string args){
 			fireMode = 2;
 			shotsLeft = guns.Count;
 		}
+		if(arg.Equals("fire_mouse"){
+			fireMode = 3;
+			shotsLeft = -1;
+		}
 		if(arg.Contains("fire_burst")){
-			int num = Convert.ToInt16(arg.Substring(9));
+			int num = Convert.ToInt16(arg.Substring(10));
 			shotsLeft = num;
 			fireMode = 2;
 		}
@@ -238,14 +244,17 @@ void SalvoFire(){
 		otherGun.Enabled = false;
 	}
 	
+	//enable the next gun as well.
 	if(nextGun != null) nextGun.Enabled = true;
+	//enable and shoot current gun
 	if(gun != null){
 		gun.Enabled = true;
-		gun.ApplyAction("ShootOnce");
+		
+		if(fireMode != 3)
+			gun.ApplyAction("ShootOnce");
 	}
 	
 	shotTimer = scriptTime + shotDelay;
 	if(shotsLeft > 0) shotsLeft --;
 	
-	//enable the next gun as well.
 }
