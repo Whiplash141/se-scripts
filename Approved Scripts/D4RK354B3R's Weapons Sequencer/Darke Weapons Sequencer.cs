@@ -172,7 +172,7 @@ void ParseCommands(string args){
 			fireMode = 2;
 			shotsLeft = guns.Count;
 		}
-		if(arg.Equals("fire_mouse"){
+		if(arg.Equals("fire_mouse")){
 			fireMode = 3;
 			shotsLeft = -1;
 		}
